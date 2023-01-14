@@ -20,7 +20,6 @@
   #include <WebServer.h>
   #include <ESPmDNS.h>
   #include <HTTPUpdateServer.h>
-  #include <SPIFFS.h>
 #elif defined (ESP8266)
   #include <ESP8266WebServer.h>
   #include <ESP8266mDNS.h>
@@ -29,6 +28,7 @@
   #error "This code is intended to run on ESP8266 or ESP32."
 #endif
 
+#include <LittleFS.h>
 #include <WiFiUdp.h>
 #include <WiFiClient.h>
 #include <FS.h>
@@ -44,9 +44,9 @@ extern "C" {
 #define VERSION "131"
 
 #if defined(ESP32)
-  #define FORMAT_SPIFFS_IF_FAILED true
+  #define FORMAT_LittleFS_IF_FAILED true
 #else
-  #define FORMAT_SPIFFS_IF_FAILED
+  #define FORMAT_LittleFS_IF_FAILED
 #endif
 
 #define HOSTNAME "ESPKey-" // Hostname prefix for DHCP/OTA
@@ -60,14 +60,14 @@ extern "C" {
 #include "pin_config.h"
 
 // Default settings used when no configuration file exists
-char log_name[20] = "Alpha";
+char log_name[20] = "Physnet";
 bool ap_enable = true;
 bool ap_hidden = false;
 char ap_ssid[20] = "ESPKey-config"; // Default SSID.
 IPAddress ap_ip(192, 168, 4, 1);
 char ap_psk[20] = "accessgranted"; // Default PSK.
-char station_ssid[20] = "";
-char station_psk[30] = "";
+char station_ssid[20] = "CAVE";
+char station_psk[30] = "The House of Wine";
 char mDNShost[20] = "ESPKey";
 String DoS_id = "7fffffff:31";
 char ota_password[24] = "ExtraSpecialPassKey";
@@ -248,7 +248,7 @@ void handleTxId(){
 }
 
 bool loadConfig() {
-  File configFile = SPIFFS.open(CONFIG_FILE, "r");
+  File configFile = LittleFS.open(CONFIG_FILE, "r");
   if (!configFile) {
     DBG_OUTPUT_PORT.println(F("Failed to open config file"));
     return false;
@@ -414,7 +414,7 @@ void IRAM_ATTR append_log(String text) {
     if (xPortInIsrContext()) return ;
   #endif
   
-  File file = SPIFFS.open("/log.txt", "a");
+  File file = LittleFS.open("/log.txt", "a");
   if(file) {
     file.print(deferredLog);
     DBG_OUTPUT_PORT.print("Appending to log: " + deferredLog);
@@ -451,10 +451,10 @@ bool handleFileRead(String path){
   if(path.endsWith(F("/"))) path += F("index.htm");
   String contentType = getContentType(path);
   String pathWithGz = path + F(".gz");
-  if(SPIFFS.exists(pathWithGz) || SPIFFS.exists(path)){
-    if(SPIFFS.exists(pathWithGz))
+  if(LittleFS.exists(pathWithGz) || LittleFS.exists(path)){
+    if(LittleFS.exists(pathWithGz))
       path += F(".gz");
-    File file = SPIFFS.open(path, "r");
+    File file = LittleFS.open(path, "r");
     server.sendHeader("Now", String(millis()));
     server.streamFile(file, contentType);
     file.close();
@@ -471,7 +471,7 @@ void handleFileUpload(){
     String filename = upload.filename;
     if(!filename.startsWith("/")) filename = "/"+filename;
     DBG_OUTPUT_PORT.println("handleFileUpload Name: " + filename);
-    fsUploadFile = SPIFFS.open(filename, "w");
+    fsUploadFile = LittleFS.open(filename, "w");
     filename = String();
   } else if(upload.status == UPLOAD_FILE_WRITE){
     //DBG_OUTPUT_PORT.println("handleFileUpload Data: " + upload.currentSize);
@@ -491,9 +491,9 @@ void handleFileDelete(){
   DBG_OUTPUT_PORT.println("handleFileDelete: " + path);
   if(path == "/")
     return server.send(500, F("text/plain"), F("BAD PATH"));
-  if(!SPIFFS.exists(path))
+  if(!LittleFS.exists(path))
     return server.send(404, F("text/plain"), F("FileNotFound"));
-  SPIFFS.remove(path);
+  LittleFS.remove(path);
   server.send(200, F("text/plain"), "");
   path = String();
 }
@@ -506,9 +506,9 @@ void handleFileCreate(){
   DBG_OUTPUT_PORT.println("handleFileCreate: " + path);
   if(path == "/")
     return server.send(500, "text/plain", "BAD PATH");
-  if(SPIFFS.exists(path))
+  if(LittleFS.exists(path))
     return server.send(500, "text/plain", "FILE EXISTS");
-  File file = SPIFFS.open(path, "w");
+  File file = LittleFS.open(path, "w");
   if(file)
     file.close();
   else
@@ -523,38 +523,30 @@ void handleFileList() {
   
   String path = server.arg("dir");
   DBG_OUTPUT_PORT.println("handleFileList: " + path);
-#if defined(ESP8266)
-  Dir dir = SPIFFS.openDir(path);
-#elif defined(ESP32)
-  File  dir = SPIFFS.open(path);
-#endif
+
+  Dir dir = LittleFS.openDir(path);
+
   path = String();
 
   String output = "[";
-#if defined(ESP8266)
+
   while(dir.next()){
     File entry = dir.openFile("r");
-#elif defined(ESP32)
-  while(File entry = dir.openNextFile()){
-#endif
+
     if (output != "[") output += ',';
-#if defined(ESP8266)
-    bool isDir = false;
-#elif defined(ESP32)
-    bool isDir = entry.isDirectory();
-#endif
+
+    bool isDir = dir.isDirectory();
+
     output += "{\"type\":\"";
     output += (isDir)?"dir":"file";
     output += "\",\"name\":\"";
-    output += String(entry.name()).substring(1);
+    output += String(entry.name()).substring(0);
     output += "\"}";
-#if defined(ESP8266)
-    entry.close();
-#endif
+ 
   }
   
   output += "]";
-  // DBG_OUTPUT_PORT.println("handleFileList: Sending " + output);
+  DBG_OUTPUT_PORT.println("handleFileList: Sending " + output);
   server.send(200, "text/json", output);
 
 }
@@ -582,7 +574,7 @@ void IRAM_ATTR resetConfig(void) {
     reset_pin_state = 1;
     if (millis() > (config_reset_millis + 2000)) {
       append_log(F("Config reset by pin."));
-      SPIFFS.remove(CONFIG_FILE);
+      LittleFS.remove(CONFIG_FILE);
       ESP.restart();
     }
   }
@@ -672,35 +664,29 @@ void setup() {
   // Print hostname.
   DBG_OUTPUT_PORT.println("Hostname: " + dhcp_hostname);
 
-  if (!SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED)) {
+  if (!LittleFS.begin(FORMAT_LittleFS_IF_FAILED)) {
     Serial.println(F("Failed to mount file system"));
     return;
   } else {
-#if defined(ESP32)
-    File dir = SPIFFS.open("/");
-    while (File entry = dir.openNextFile()) {
-      String fileName = entry.name();
-#else
-    Dir dir = SPIFFS.openDir("/");
+
+    Dir dir = LittleFS.openDir("/");
     while (dir.next()) {
       String fileName = dir.fileName();
-#endif
+
 
       // This is a dirty hack to deal with readers which don't pull LED up to 5V
       if (fileName == String("/auth.txt")) detachInterrupt(digitalPinToInterrupt(LED_SENSE));
 
-#if defined(ESP32)
-      size_t fileSize = entry.size();
-#else
+
       size_t fileSize = dir.fileSize();
-#endif
+
       DBG_OUTPUT_PORT.printf("FS File: %s, size: %s\n", fileName.c_str(), formatBytes(fileSize).c_str());
     }
   }
 
   // If a log.txt exists, use ap_ssid=ESPKey-<chipid> instead of the default ESPKey-config
   // A config file will take precedence over this
-  if (SPIFFS.exists("/log.txt")) dhcp_hostname.toCharArray(ap_ssid, sizeof(ap_ssid));
+  if (LittleFS.exists("/log.txt")) dhcp_hostname.toCharArray(ap_ssid, sizeof(ap_ssid));
   append_log(F("Starting up!"));
 
   // Load config file.
@@ -785,7 +771,7 @@ void setup() {
   server.on("/txid", HTTP_GET, handleTxId);
   server.on("/format", HTTP_DELETE, [](){
     if (basicAuthFailed()) return false;
-    if(SPIFFS.format()) server.send(200, "text/plain", "Format success!");
+    if(LittleFS.format()) server.send(200, "text/plain", "Format success!");
     return true ;
   });
   //list directory
@@ -806,7 +792,7 @@ void setup() {
   server.on("/restart", HTTP_GET, handleRestart);
 
   //called when the url is not defined here
-  //use it to load content from SPIFFS
+  //use it to load content from LittleFS
   server.onNotFound([](){
     if (basicAuthFailed()) return false;
     if(!handleFileRead(server.uri()))
@@ -843,7 +829,7 @@ void setup() {
     json = String();
     return true;
   });
-  server.serveStatic("/static", SPIFFS, "/static","max-age=86400");
+  server.serveStatic("/static", LittleFS, "/static","max-age=86400");
   httpUpdater.setup(&server);	// This doesn't do authentication
   server.begin();
   MDNS.addService("http", "tcp", 80);
@@ -855,7 +841,7 @@ String grep_auth_file() {
   char* this_id;
   int cnt = 0;
 
-  File f = SPIFFS.open(AUTH_FILE, "r");
+  File f = LittleFS.open(AUTH_FILE, "r");
   if (!f) {
     DBG_OUTPUT_PORT.println(F("Failed to open auth file"));
     return "";
