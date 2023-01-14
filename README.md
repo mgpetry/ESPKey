@@ -37,3 +37,7 @@ Check out [this great documentation](https://redteamtools.com/espkey) put togeth
 
 ### Hardware
 Hardware can be [purchased](https://redteamtools.com/espkey) or have a look in the [hardware](hardware/) directory if you want to build your own.
+
+### Build Hints
+1. Make sure you rebuild and install both the firmware and data partitions for you ESP (if needed)
+2. Run the src/html_src/publish.sh script before building the data partition
