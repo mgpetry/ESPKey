@@ -66,8 +66,8 @@ bool ap_hidden = false;
 char ap_ssid[20] = "ESPKey-config"; // Default SSID.
 IPAddress ap_ip(192, 168, 4, 1);
 char ap_psk[20] = "accessgranted"; // Default PSK.
-char station_ssid[20] = "CAVE";
-char station_psk[30] = "The House of Wine";
+char station_ssid[20] = "";
+char station_psk[30] = "";
 char mDNShost[20] = "ESPKey";
 String DoS_id = "7fffffff:31";
 char ota_password[24] = "ExtraSpecialPassKey";
